@@ -13,6 +13,7 @@
 # ========= Copyright 2023-2024 @ CAMEL-AI.org. All Rights Reserved. =========
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import textwrap
@@ -120,6 +121,26 @@ SIMPLE_FORMAT_PROMPT = TextPrompt(
     )
 )
 
+
+class ListenStepModel(BaseModel):
+    input_message: Union[BaseMessage, str]
+    response_format: Optional[Type[BaseModel]] = None
+    response: Optional[ChatAgentResponse] = None
+    """The response of step/astep function. before yield is None, after yield is the ChatAgentResponse."""
+
+def listen_step(func:Callable[[ChatAgent, Union[BaseMessage, str], Optional[Type[BaseModel]]], ChatAgentResponse]):
+    @functools.wraps(func)
+    def wrapper(model: ChatAgent, input_message: Union[BaseMessage, str], response_format: Optional[Type[BaseModel]] = None):
+        if model.listen_step is None:
+            response = func(model, input_message, response_format)
+        else:
+            params = ListenStepModel(input_message=input_message, response_format=response_format)
+            gen = model.listen_step(params)
+            next(gen)
+            response = func(model, input_message, response_format)
+            next(gen, None)
+        return response
+    return wrapper
 
 @track_agent(name="ChatAgent")
 class ChatAgent(BaseAgent):
@@ -293,6 +314,10 @@ class ChatAgent(BaseAgent):
         for terminator in self.response_terminators:
             terminator.reset()
 
+    def set_listen_step(self, callback: Callable[[ListenStepModel]]):
+        self.listen_step:Callable[[ListenStepModel]] = callback
+
+    # def set_listen_toolkit(self, callback: Callab)
     def _resolve_models(
         self,
         model: Optional[
